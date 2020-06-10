@@ -1,6 +1,8 @@
 import argparse
+
 import sys
 
+url_issuer = "http://127.0.0.1:8200"
 data = dict()
 arr_data = list()
 
@@ -19,6 +21,7 @@ try:
         for line in cert_file.readlines():
             data['path'], data['domain'], data['issuer'], data['hours'] = line.replace(
                 "\n", "").split("|")
+            # data.copy() is because of the just data will be used every time at for, to alway get new items to array
             arr_data.append(data.copy())
     finally:
         cert_file.close()
@@ -26,5 +29,11 @@ except:
     print("The file cannot be opened or something goes worng, please check the file")
     exit()
 
+if args.dry_run:
+    print("By using dry-run option we will be issuing this certificates for those autorieties:")
+    for elem in arr_data:
+        print("Mounting {} for {} with issuer {} by TTL: {}".format(
+            elem['path'], elem['domain'], elem['issuer'], elem['hours']))
+    exit()
 
 print(arr_data)
