@@ -2,7 +2,7 @@ import argparse
 import sys
 
 data = dict()
-arr_data = []
+arr_data = list()
 
 arg_parser = argparse.ArgumentParser(
     description='This tool is generating the CAs based on the config file, you can use also dry-run option')
@@ -17,12 +17,14 @@ try:
     try:
         cert_file = open(args.config, 'r')
         for line in cert_file.readlines():
-            data['path'], data['domain'], data['issuer'], data['hours'] = line.split(
-                '|')
-            arr_data.append(data)
-        print(arr_data)
+            data['path'], data['domain'], data['issuer'], data['hours'] = line.replace(
+                "\n", "").split("|")
+            arr_data.append(data.copy())
     finally:
         cert_file.close()
 except:
     print("The file cannot be opened or something goes worng, please check the file")
     exit()
+
+
+print(arr_data)
