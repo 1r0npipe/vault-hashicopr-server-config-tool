@@ -3,7 +3,7 @@ import requests
 import hvac
 import os
 
-TOKEN = "s.FDXQC669EZVZSF1zrI2mpXmI" or os.getenv('VAULT_TOKEN')
+TOKEN = "s.z4iBT9RYAFV8SvtVWEl0dhw8" or os.getenv('VAULT_TOKEN')
 URL_VAULT = "http://127.0.0.1:8200" or os.getenv('VAULT_ADDR')
 
 data = dict()
@@ -19,28 +19,55 @@ def get_vault_client(vault_url, token_id):
         return client_hvac
 
 
-def mount_vault(mount_point, ttl, description_message, domain_name, issuer):
 
+def mount_vault(mount_point, ttl, description_message, domain_name, issuer):
+    headers = {
+        'X-Vault-Request': 'true',
+        'X-Vault-Token': TOKEN,
+    }
     try:
         if "/" in mount_point:
             mount_point, root = mount_point.split('/')[-1], mount_point.split('/')[-2]
+            client.sys.enable_secrets_engine(backend_type='pki', path=mount_point, description=description_message)
+            client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=int(ttl)*2)
             
+            # Vault CLI for generating a Certificate Signing Request
+            data = '{"common_name":"' + domain_name + ' Intermediate Authority","ttl":"' + ttl + '"}'
+            response = requests.put(URL_VAULT + '/v1/' + mount_point + '/intermediate/generate/internal', headers=headers, data=data)
+            json_out = response.json()
+            json_out_sign_req = json_out['data']['csr']
+            f=open('temp.csr','w')
+            f.write(json_out_sign_req)
+            f.close()
+            # Sign the CSR, note the use of the pem_bundle format and the ttl
+            data = '{"csr":"@temp.csr","format":"pem_bundle","ttl":"' + ttl + '"}'
+            response = requests.put(URL_VAULT + '/v1/' + root + '/root/sign-intermediate', headers=headers, data=data)
+            
+            json_out = response.json()
+            json_out_sign_req = json_out['data']['certificate']
+            
+            f=open('temp.csr','w')
+            f.write(json_out_sign_req)
+            f.close()
+
+            data = '{"certificate":"@temp.scr","format":"pem_bundle","ttl":"' + ttl + '"}'
+            response = requests.put(URL_VAULT + '/v1/' + mount_point + '/intermediate/set-signed', headers=headers, data=data)
+            
+
+            # create a role based on raw REST call:
+
+            data = '{"allow_any_name":"false","allow_glob_domains":"true","allow_subdomains":"true","allowed_domains": "' + domain_name + '","enforce_hostnames":"false","ttl": "' + str(ttl) +'"}'
+            requests.put(URL_VAULT + '/v1/' + mount_point + '/roles/testrole', headers=headers, data=data)
+            return None  #escape after configuration of intermediate CA
+
         client.sys.enable_secrets_engine(backend_type='pki', path=mount_point, description=description_message)
         client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=int(ttl)*2)
         
         # create a role based on raw REST call:
-        headers = {
-            'X-Vault-Request': 'true',
-            'X-Vault-Token': TOKEN,
-        }
         data = '{"allow_any_name":"false","allow_glob_domains":"true","allow_subdomains":"true","allowed_domains": "' + domain_name + '","enforce_hostnames":"false","ttl": "' + str(ttl) +'"}'
         requests.put(URL_VAULT + '/v1/' + mount_point + '/roles/testrole', headers=headers, data=data)
         
         #create the ROOT CA based on raw REST call
-        headers = {
-            'X-Vault-Token': TOKEN,
-            'X-Vault-Request': 'true',
-        }
         data = '{"common_name":"' + issuer + '"}'
         requests.put(URL_VAULT + '/v1/' + mount_point + '/root/generate/internal', headers=headers, data=data)
 
