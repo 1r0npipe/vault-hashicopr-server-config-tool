@@ -3,7 +3,7 @@ import requests
 import hvac
 import os
 
-TOKEN = "s.BGcZW8SQWystPuDOJDRXRsGi" or os.getenv('VAULT_TOKEN')
+TOKEN = "s.cFmDf6dmAtZYiCscLt4B2QKz" or os.getenv('VAULT_TOKEN')
 URL_VAULT = "http://127.0.0.1:8200" or os.getenv('VAULT_ADDR')
 
 data = dict()
@@ -27,6 +27,14 @@ def mount_vault(mount_point, ttl, description_message, domain_name, issuer):
            
         client.sys.enable_secrets_engine(backend_type='pki', path=mount_point, description=description_message)
         client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=int(ttl)*2)
+        headers = {
+            'X-Vault-Request': 'true',
+            'X-Vault-Token': TOKEN,
+        }
+        data = '{"allow_any_name":"false","allow_glob_domains":"true","allow_subdomains":"true","allowed_domains": "' + domain_name + '","enforce_hostnames":"false","ttl": "' + str(ttl) +'"}'
+        response = requests.put(URL_VAULT + '/v1/' + mount_point + '/roles/testrole', headers=headers, data=data)
+        if response.status_code == 204:
+            print("Created")
     except:
         print("The path is already exist or something goes wrong with allocation of mountpoint: {}".format(mount_point))
         return None
