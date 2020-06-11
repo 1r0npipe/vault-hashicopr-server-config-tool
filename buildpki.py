@@ -3,7 +3,7 @@ import requests
 import hvac
 import os
 
-TOKEN = "s.HQDsVo77FweYhB2yL7D14RxP" or os.getenv('VAULT_TOKEN')
+TOKEN = "s.BGcZW8SQWystPuDOJDRXRsGi" or os.getenv('VAULT_TOKEN')
 URL_VAULT = "http://127.0.0.1:8200" or os.getenv('VAULT_ADDR')
 
 data = dict()
@@ -11,31 +11,24 @@ arr_data = list()
 
 
 def get_vault_client(vault_url, token_id):
-    client = hvac.Client(url=vault_url, token=token_id)
-    if not client.is_authenticated():
+    client_hvac = hvac.Client(url=vault_url, token=token_id)
+    if not client_hvac.is_authenticated():
         print("Failed to autentificate with Vault ({}) or token ({}) is wrong, please check server URL or/and your token".format(vault_url, token_id))
         return None
     else:
-        return client
+        return client_hvac
 
 
-def mount_vault(vault_url, token_id, mount_point, ttl, description_message, domain_name):
-    client = get_vault_client(vault_url, token_id)
+def mount_vault(mount_point, ttl, description_message, domain_name, issuer):
+
     try:
+        if "/" in mount_point:
+            mount_point, root = mount_point.split('/')[-1], mount_point.split('/')[-2]
+           
         client.sys.enable_secrets_engine(backend_type='pki', path=mount_point, description=description_message)
-        print("Successfully allocated secret for mountpoint: {} for server_vault: {}".format(mount_point, vault_url))
-        client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=ttl*2)
-        # curl -X PUT -H "X-Vault-Request: true" -H "X-Vault-Token: $(vault print token)" 
-        # -d '{"allow_any_name":"false","allow_glob_domains":"true","allow_subdomains":"true","allowed_domains":"mycompany-internal.org",
-        # "enforce_hostnames":"false","ttl":"8760"}' http://127.0.0.1:8200/v1/issuing
-        vault_url = vault_url + '/v1/' + mount_point
-        headers_req = {'X-Vault-Request': true, 'X-Vault-Token': token_id}
-        payload_req = {"allow_any_name":"false","allow_glob_domains":"true","allow_subdomains":"true","allowed_domains":domain_name,
-            "enforce_hostnames":"false","ttl":ttl}
-        req = requests.put(vault_url, data=payload_req, headers=headers_req)
- 
+        client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=int(ttl)*2)
     except:
-        print("The path is already exist or something goes wrong with allocation of mountpoint: {} for server_vault: {}".format(mount_point, vault_url))
+        print("The path is already exist or something goes wrong with allocation of mountpoint: {}".format(mount_point))
         return None
 
 
@@ -73,8 +66,10 @@ if args.dry_run:
 
 # client_hvac = hvac.Client(URL_VAULT, namespace=os.getenv('VAULT_NAMESPACE'))  # if we will require to set up namespace TEST purposes
 
-for element in arr_data:
-    mount_vault(URL_VAULT, TOKEN, element['path'], element['ttl'],"The secret for " + element['domain'] + " from " + element['issuer'],
-        element['domain'])
+client = get_vault_client(URL_VAULT, TOKEN)
 
-# print(get_vault_client(URL_VAULT, TOKEN))
+for element in arr_data:
+    mount_vault( element['path'], element['ttl'],"The secret for " + element['domain'] + " from " + element['issuer'],element['domain'], element['issuer'])
+
+
+
