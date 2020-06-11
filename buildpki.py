@@ -3,7 +3,7 @@ import requests
 import hvac
 import os
 
-TOKEN = "s.06etcghxepm81m8V4vvdWxss" or os.getenv('VAULT_TOKEN')
+TOKEN = "s.FDXQC669EZVZSF1zrI2mpXmI" or os.getenv('VAULT_TOKEN')
 URL_VAULT = "http://127.0.0.1:8200" or os.getenv('VAULT_ADDR')
 
 data = dict()
@@ -60,19 +60,18 @@ arg_parser.add_argument('--dry-run', action='store_true', required=False, defaul
 args = arg_parser.parse_args()
 
 # reading the content of file
+
 try:
-    try:
-        cert_file = open(args.config, 'r')
-        for line in cert_file.readlines():
-            data['path'], data['domain'], data['issuer'], data['ttl'] = line.replace("\n", "").split("|")
-            # data.copy() is because of the just data will be used every time at for, to alway get new items to array
-            arr_data.append(data.copy())
-    finally:
-        cert_file.close()
+    cert_file = open(args.config, 'r')
+    for line in cert_file.readlines():
+        data['path'], data['domain'], data['issuer'], data['ttl'] = line.replace("\n", "").split("|")
+        # data.copy() is because of the just data will be used every time at for, to alway get new items to array
+        arr_data.append(data.copy())  
 except:
     print("The file cannot be opened or something goes worng, please check the file")
     exit()
-
+finally:
+        cert_file.close()
 # checking if dry-run is required, afterwards the EXIT will happen
 if args.dry_run:
     print("By using dry-run option, we will be creating this secret for those autorieties, WITHOUT any real modifications:")
@@ -86,7 +85,7 @@ if args.dry_run:
 client = get_vault_client(URL_VAULT, TOKEN)
 
 for element in arr_data:
-    mount_vault( element['path'], element['ttl'],"The secret for " + element['domain'] + " from " + element['issuer'],element['domain'], element['issuer'])
+    mount_vault(element['path'], element['ttl'],"The secret for " + element['domain'] + " from " + element['issuer'],element['domain'], element['issuer'])
 
 
 
