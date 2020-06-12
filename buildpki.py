@@ -3,7 +3,7 @@ import requests
 import hvac
 import os
 
-TOKEN = "s.zGIzd4rqvDFm0mlItFTKclyB" or os.getenv('VAULT_TOKEN')
+TOKEN = "s.yvfKzzbqFRSBZjCCeNVNe1Cl" or os.getenv('VAULT_TOKEN')
 URL_VAULT = "http://127.0.0.1:8200" or os.getenv('VAULT_ADDR')
 
 data = dict()
@@ -19,54 +19,67 @@ def get_vault_client(vault_url, token_id):
         return client_hvac
 
 
-
-def mount_vault(mount_point, ttl, description_message, domain_name, issuer):
+def mount_vault(mount_point, ttl, description_message, domain_name, common_name):
     headers = {
         'X-Vault-Request': 'true',
         'X-Vault-Token': TOKEN,
     }
     try:
-        if "/" in mount_point:
+        if "/" in mount_point:  # working with only intermediate entity if that is available with "/" character as of template
             mount_point, root = mount_point.split('/')[-1], mount_point.split('/')[-2]
             client.sys.enable_secrets_engine(backend_type='pki', path=mount_point, description=description_message)
             client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=int(ttl)*2)
             
             # Vault CLI for generating a Certificate Signing Request
-            data = '{"common_name":"My Intermediate","ttl":"' + ttl + '","alt_names":"something.com"}'
-            response = requests.put(URL_VAULT + '/v1/' + mount_point + '/intermediate/generate/internal', headers=headers, data=data)
-            json_out = response.json()
-            json_out_sign_req = json_out['data']['csr'].replace("\n","")
+            generate_intermediate_response = client.secrets.pki.generate_intermediate(
+                type='internal',
+                common_name=common_name,
+                mount_point=mount_point
+            )
+            
+            # getting the CSR request entity
+            csr_data=generate_intermediate_response['data']['csr']
 
             # Sign the CSR, note the use of the pem_bundle format and the ttl
-            data = '{"csr":"'+ json_out_sign_req + '","format":"pem_bundle","ttl":"' + ttl + '"}'
-            response = requests.post(URL_VAULT + '/v1/' + root + '/root/sign-intermediate', headers=headers, data=data)
+            sign_intermediate = client.secrets.pki.sign_intermediate(
+                csr=csr_data,
+                common_name=common_name,
+                mount_point=root
+            )
             
-            json_out = response.json()
-            json_out_sign_req = json_out['data']['certificate']
+            # getting cert entity
+            data_cert=sign_intermediate['data']['certificate']
             
-            data = '{"certificate":"' +  json_out_sign_req + '","format":"pem_bundle","ttl":"' + ttl + '"}'
-            response = requests.post(URL_VAULT + '/v1/' + mount_point + '/intermediate/set-signed', headers=headers, data=data)
-            
+            # submitting the signed CA certificate
+            set_signed_intermediate = client.secrets.pki.set_signed_intermediate(
+                certificate = data_cert,
+                mount_point=mount_point
+            )
 
-            # create a role based on raw REST call:
+            #if option can be provided to check the status.
 
+            # create a role based on raw REST call for intermedate entity:
             data = '{"allow_any_name":"false","allow_glob_domains":"true","allow_subdomains":"true","allowed_domains": "' + domain_name + '","enforce_hostnames":"false","ttl": "' + str(ttl) +'"}'
             requests.put(URL_VAULT + '/v1/' + mount_point + '/roles/testrole', headers=headers, data=data)
+
             return None  #escape after configuration of intermediate CA
 
+        # working with ROOT entities
         client.sys.enable_secrets_engine(backend_type='pki', path=mount_point, description=description_message)
         client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=int(ttl)*2)
         
-        # create a role based on raw REST call:
+        # create a role based on raw REST call for root entity:
         data = '{"allow_any_name":"false","allow_glob_domains":"true","allow_subdomains":"true","allowed_domains": "' + domain_name + '","enforce_hostnames":"false","ttl": "' + str(ttl) +'"}'
-        requests.put(URL_VAULT + '/v1/' + mount_point + '/roles/testrole', headers=headers, data=data)
+        requests.post(URL_VAULT + '/v1/' + mount_point + '/roles/testrole', headers=headers, data=data)
         
         #create the ROOT CA based on raw REST call
-        data = '{"common_name":"' + issuer + '"}'
-        requests.put(URL_VAULT + '/v1/' + mount_point + '/root/generate/internal', headers=headers, data=data)
+        data = '{"common_name":"' + common_name + '"}'
+        requests.post(URL_VAULT + '/v1/' + mount_point + '/root/generate/internal', headers=headers, data=data)
+
 
     except:
-        print("The path is already exist or something goes wrong with allocation of mountpoint: {}".format(mount_point))
+        #print("The path is already exist or something goes wrong with allocation of common name: {}".format(mount_point))
+        #can be added reasonable message if it tries to allocate once again
         return None
 
 
@@ -81,15 +94,15 @@ arg_parser.add_argument('--dry-run', action='store_true', required=False, defaul
 args = arg_parser.parse_args()
 
 # reading the content of file
-
 try:
     cert_file = open(args.config, 'r')
     for line in cert_file.readlines():
-        data['path'], data['domain'], data['issuer'], data['ttl'] = line.replace("\n", "").split("|")
-        # data.copy() is because of the just data will be used every time at for, to alway get new items to array
-        arr_data.append(data.copy())  
+        if not line.startswith("#"):
+            data['path'], data['domain'], data['common_name'], data['ttl'] = line.replace("\n", "").split("|")
+            # data.copy() is because of the just data will be used every time at for, to alway get new items to array
+            arr_data.append(data.copy())  
 except:
-    print("The file cannot be opened or something goes worng, please check the file")
+    print("The file cannot be opened or something goes worng, please check the file format")
     exit()
 finally:
         cert_file.close()
@@ -97,16 +110,16 @@ finally:
 if args.dry_run:
     print("By using dry-run option, we will be creating this secret for those autorieties, WITHOUT any real modifications:")
     for elem in arr_data:
-        print("Mounting {} for {} with issuer {} by TTL: {}".format(
-            elem['path'], elem['domain'], elem['issuer'], elem['ttl']))
+        print("Mounting {} for {} with common_name {} by TTL: {}".format(
+            elem['path'], elem['domain'], elem['common_name'], elem['ttl']))
     exit()
 
-# client_hvac = hvac.Client(URL_VAULT, namespace=os.getenv('VAULT_NAMESPACE'))  # if we will require to set up namespace TEST purposes
-
+# allocate client connection to the vault server
 client = get_vault_client(URL_VAULT, TOKEN)
 
+# processing with the all entities from config file 
 for element in arr_data:
-    mount_vault(element['path'], element['ttl'],"The secret for " + element['domain'] + " from " + element['issuer'],element['domain'], element['issuer'])
+    mount_vault(element['path'], element['ttl'],"The secret for " + element['domain'] + " from " + element['common_name'],element['domain'], element['common_name'])
 
 
 
