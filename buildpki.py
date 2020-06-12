@@ -32,10 +32,10 @@ def mount_vault(mount_point, ttl, description_message, domain_name, issuer):
             client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=int(ttl)*2)
             
             # Vault CLI for generating a Certificate Signing Request
-            data = '{"common_name":"' + domain_name + ' Intermediate Authority","ttl":"' + ttl + '"}'
+            data = '{"common_name":"My Intermediate","ttl":"' + ttl + '","alt_names":"something.com"}'
             response = requests.put(URL_VAULT + '/v1/' + mount_point + '/intermediate/generate/internal', headers=headers, data=data)
             json_out = response.json()
-            json_out_sign_req = json_out['data']['csr']
+            json_out_sign_req = json_out['data']['csr'].replace("\n","")
 
             # Sign the CSR, note the use of the pem_bundle format and the ttl
             data = '{"csr":"'+ json_out_sign_req + '","format":"pem_bundle","ttl":"' + ttl + '"}'
