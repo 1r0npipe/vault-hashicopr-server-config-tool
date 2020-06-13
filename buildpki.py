@@ -1,10 +1,10 @@
 import argparse
-import requests
 import hvac
 import os
 
-TOKEN = "s.h0hqkYNW4oTWIIKbrUJVTDh2" or os.getenv('VAULT_TOKEN')
-URL_VAULT = "http://127.0.0.1:8200" or os.getenv('VAULT_ADDR')
+TOKEN = "s.0veOHBqxzOHs8879A74NxWFq" or os.getenv('VAULT_TOKEN')
+URL_VAULT = None or os.getenv('VAULT_ADDR')
+DEFAULT_MAX_TTL = '320000'
 
 data = dict()
 arr_data = list()
@@ -14,29 +14,39 @@ def get_vault_client(vault_url, token_id):
     client_hvac = hvac.Client(url=vault_url, token=token_id)
     if not client_hvac.is_authenticated():
         print("Failed to autentificate with Vault ({}) or token ({}) is wrong, \
-               please check server URL or/and your token".format(vault_url, token_id))
+            please check server URL or/and your token".format(vault_url, token_id))
         return None
     else:
         return client_hvac
 
 
-def mount_vault(mount_point, domain_name,description_message, common_name,ttl):
+def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
 
     SUCCESS_CODE = 204
     ROLE_NAME = 'testrole'
+    ALT_NAMES = 'something.com'
 
     try:# working with only intermediate entity if that is available with "/" character as of template
         if "/" in mount_point:  
             mount_point, root = mount_point.split('/')[-1], mount_point.split('/')[-2]
-            
-            client.sys.enable_secrets_engine(backend_type='pki', path=mount_point, description=description_message)
-            client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=ttl)
+
+            client.sys.enable_secrets_engine(
+                backend_type = 'pki', 
+                path = mount_point, 
+                description = "The secret for " + domain_name + " from " + common_name
+            )
+
+
+            client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=DEFAULT_MAX_TTL)
             
             # Vault CLI for generating a Certificate Signing Request
             generate_intermediate_response = client.secrets.pki.generate_intermediate(
                 type = 'internal',
                 common_name = common_name,
-                mount_point = mount_point
+                mount_point = mount_point,
+                extra_params = {
+                    'alt_names': ALT_NAMES
+                }
             )
             
             # Sign the CSR, note the use of the pem_bundle format and the ttl
@@ -58,7 +68,14 @@ def mount_vault(mount_point, domain_name,description_message, common_name,ttl):
             
             set_role = client.secrets.pki.create_or_update_role(
                 name = ROLE_NAME,
-                mount_point = mount_point
+                mount_point = mount_point,
+                extra_params = {   
+                    'allow_subdomains': 'true',
+                    'allow_any_name': 'false',
+                    'allow_glob_domains': 'true',
+                    'enforce_hostnames': 'false',
+                    'allowed_domains': domain_name
+                }
             )
 
             #if option can be provided to check the status of role creation.
@@ -67,15 +84,34 @@ def mount_vault(mount_point, domain_name,description_message, common_name,ttl):
 
             return None  #escape after configuration of intermediate CA
 
+        if not ttl:
+            print('The TTL is not specified for Root cert, please make sure it is set up at file')
+            exit()
+
         # working with ROOT entities
-        client.sys.enable_secrets_engine(backend_type='pki', path=mount_point, description=description_message)
-        client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=ttl)
+        client.sys.enable_secrets_engine(
+            backend_type='pki', 
+            path = mount_point, 
+            description = "The secret for " + domain_name + " from " + common_name
+            )
+        client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=DEFAULT_MAX_TTL)
         
         # create a role based on call for root entity:
         set_role = client.secrets.pki.create_or_update_role(
             name = ROLE_NAME,
-            mount_point = mount_point
+            mount_point = mount_point,
+            extra_params = {   
+                'allow_subdomains': 'true',
+                'allow_any_name': 'false',
+                'allow_glob_domains': 'true',
+                'enforce_hostnames': 'false',
+                'allowed_domains': domain_name
+            }
         )
+        
+        # stub for the set role status
+        if set_role.status_code == SUCCESS_CODE:
+            pass
         
         #create the ROOT CA based on raw call
         set_root = client.secrets.pki.generate_root(
@@ -83,7 +119,10 @@ def mount_vault(mount_point, domain_name,description_message, common_name,ttl):
             common_name = common_name,
             mount_point = mount_point
         )
-
+        
+        # stub for the set root cert status
+        if set_root.status_code == SUCCESS_CODE:
+            pass
     except:
         #print("The path is already exist or something goes wrong with allocation of common name: {}".format(mount_point))
         #can be added reasonable message if it tries to allocate once again
@@ -111,7 +150,7 @@ except:
     print("The file cannot be opened or something goes worng, please check the file format")
     exit()
 finally:
-        cert_file.close()
+    cert_file.close()
 
 # checking if dry-run is required, afterwards the EXIT will happen
 if args.dry_run:
@@ -129,10 +168,9 @@ client = get_vault_client(URL_VAULT, TOKEN)
 
 # processing with the all entities from config file 
 for element in arr_data:
-    mount_vault(
+    allocate_cert_vault(
         element['path'], \
         element['domain'], \
-        "The secret for " + element['domain'] + " from " + element['common_name'], \
         element['common_name'], \
         element['ttl']
     )
