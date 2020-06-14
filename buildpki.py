@@ -63,7 +63,7 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
                 ttl = str(int((sign_intermediate['data']['expiration'] - int(datetime.now().timestamp())) / DIVIDED_VALUE))
            
             ttl = ttl + POSTFIX_TIME # add hours
-            print("ttl is" + ttl)
+
             # submitting the signed CA certificate
             set_signed_intermediate = client.secrets.pki.set_signed_intermediate(
                 certificate = sign_intermediate['data']['certificate'],
