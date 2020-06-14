@@ -5,7 +5,7 @@ import os
 
 TOKEN = None or os.getenv('VAULT_TOKEN')
 URL_VAULT = None or os.getenv('VAULT_ADDR')
-DEFAULT_MAX_TTL = '17520h'
+DEFAULT_MAX_TTL = '8760h'
 
 data = dict()
 arr_data = list()
@@ -24,6 +24,8 @@ def get_vault_client(vault_url, token_id):
 def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
 
     SUCCESS_CODE = 204
+    POSTFIX_TIME = 'h'  # for hours next line has to be adjasted
+    DIVIDED_VALUE = 3600
     ROLE_NAME = 'testrole'
     ALT_NAMES = 'something.com'
 
@@ -56,10 +58,12 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
             )
 
             # check it TTL is exist and allocate getting from the singed intermediate based on root one
+            
             if ttl == '0':
-                ttl = str(sign_intermediate['data']['expiration'] - int(datetime.now().timestamp()))
+                ttl = str(int((sign_intermediate['data']['expiration'] - int(datetime.now().timestamp())) / DIVIDED_VALUE))
            
-      
+            ttl = ttl + POSTFIX_TIME # add hours
+            print("ttl is" + ttl)
             # submitting the signed CA certificate
             set_signed_intermediate = client.secrets.pki.set_signed_intermediate(
                 certificate = sign_intermediate['data']['certificate'],
@@ -85,6 +89,7 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
                     'allow_any_name': 'false',
                     'allow_glob_domains': 'true',
                     'enforce_hostnames': 'false',
+                    'ttl': ttl,
                     'allowed_domains': domain_name
                 }
             )
@@ -95,17 +100,22 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
 
             return None  #escape after configuration of intermediate CA
 
-        if ttl is None:
+        if ttl == '0':
             print('The TTL is not specified for Root cert, please make sure it is set up at file')
             exit()
-            
+
+        ttl = ttl + POSTFIX_TIME    
         # working with ROOT entities
         client.sys.enable_secrets_engine(
             backend_type='pki', 
             path = mount_point, 
             description = "The secret for " + domain_name + " from " + common_name
-            )
-        client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=DEFAULT_MAX_TTL)
+        )
+        client.sys.tune_mount_configuration(
+            mount_point, 
+            default_lease_ttl=ttl, 
+            max_lease_ttl=DEFAULT_MAX_TTL
+        )
         
         # create a role based on call for root entity:
         set_role = client.secrets.pki.create_or_update_role(
