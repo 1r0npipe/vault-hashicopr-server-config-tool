@@ -1,10 +1,11 @@
 import argparse
+from datetime import datetime
 import hvac
 import os
 
-TOKEN = "s.0veOHBqxzOHs8879A74NxWFq" or os.getenv('VAULT_TOKEN')
+TOKEN = None or os.getenv('VAULT_TOKEN')
 URL_VAULT = None or os.getenv('VAULT_ADDR')
-DEFAULT_MAX_TTL = '320000'
+DEFAULT_MAX_TTL = '8760h'
 
 data = dict()
 arr_data = list()
@@ -23,6 +24,8 @@ def get_vault_client(vault_url, token_id):
 def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
 
     SUCCESS_CODE = 204
+    POSTFIX_TIME = 'h'  # for hours next line has to be adjasted
+    DIVIDED_VALUE = 3600
     ROLE_NAME = 'testrole'
     ALT_NAMES = 'something.com'
 
@@ -36,9 +39,6 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
                 description = "The secret for " + domain_name + " from " + common_name
             )
 
-
-            client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=DEFAULT_MAX_TTL)
-            
             # Vault CLI for generating a Certificate Signing Request
             generate_intermediate_response = client.secrets.pki.generate_intermediate(
                 type = 'internal',
@@ -49,13 +49,21 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
                 }
             )
             
+
             # Sign the CSR, note the use of the pem_bundle format and the ttl
             sign_intermediate = client.secrets.pki.sign_intermediate(
                 csr = generate_intermediate_response['data']['csr'],
                 common_name = common_name,
                 mount_point = root
             )
-                        
+
+            # check it TTL is exist and allocate getting from the singed intermediate based on root one
+            
+            if ttl == '0':
+                ttl = str(int((sign_intermediate['data']['expiration'] - int(datetime.now().timestamp())) / DIVIDED_VALUE))
+           
+            ttl = ttl + POSTFIX_TIME # add hours
+
             # submitting the signed CA certificate
             set_signed_intermediate = client.secrets.pki.set_signed_intermediate(
                 certificate = sign_intermediate['data']['certificate'],
@@ -66,6 +74,13 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
             if set_signed_intermediate.status_code == SUCCESS_CODE:
                 pass
             
+            # procced with establishing TTL    
+            client.sys.tune_mount_configuration(
+                mount_point, 
+                default_lease_ttl=ttl, 
+                max_lease_ttl=DEFAULT_MAX_TTL
+            )
+
             set_role = client.secrets.pki.create_or_update_role(
                 name = ROLE_NAME,
                 mount_point = mount_point,
@@ -74,6 +89,7 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
                     'allow_any_name': 'false',
                     'allow_glob_domains': 'true',
                     'enforce_hostnames': 'false',
+                    'ttl': ttl,
                     'allowed_domains': domain_name
                 }
             )
@@ -84,17 +100,22 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
 
             return None  #escape after configuration of intermediate CA
 
-        if not ttl:
+        if ttl == '0':
             print('The TTL is not specified for Root cert, please make sure it is set up at file')
             exit()
 
+        ttl = ttl + POSTFIX_TIME    
         # working with ROOT entities
         client.sys.enable_secrets_engine(
             backend_type='pki', 
             path = mount_point, 
             description = "The secret for " + domain_name + " from " + common_name
-            )
-        client.sys.tune_mount_configuration(mount_point, default_lease_ttl=ttl, max_lease_ttl=DEFAULT_MAX_TTL)
+        )
+        client.sys.tune_mount_configuration(
+            mount_point, 
+            default_lease_ttl=ttl, 
+            max_lease_ttl=DEFAULT_MAX_TTL
+        )
         
         # create a role based on call for root entity:
         set_role = client.secrets.pki.create_or_update_role(
@@ -105,6 +126,7 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
                 'allow_any_name': 'false',
                 'allow_glob_domains': 'true',
                 'enforce_hostnames': 'false',
+                'ttl': ttl,
                 'allowed_domains': domain_name
             }
         )
@@ -117,9 +139,12 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
         set_root = client.secrets.pki.generate_root(
             type = 'internal',
             common_name = common_name,
-            mount_point = mount_point
+            mount_point = mount_point,
+            extra_params = {
+                'ttl': ttl
+            }
         )
-        
+
         # stub for the set root cert status
         if set_root.status_code == SUCCESS_CODE:
             pass
@@ -145,6 +170,8 @@ try:
         if not line.startswith("#"):
             data['path'], data['domain'], data['common_name'], data['ttl'] = line.replace("\n", "").split("|")
             # data.copy() is because of the just data will be used every time at for, to alway get new items to array
+            if data['ttl'] == '':
+                data['ttl'] = '0'
             arr_data.append(data.copy())  
 except:
     print("The file cannot be opened or something goes worng, please check the file format")
