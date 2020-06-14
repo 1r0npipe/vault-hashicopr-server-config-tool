@@ -64,23 +64,7 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
            
             ttl = ttl + POSTFIX_TIME # add hours
 
-            # submitting the signed CA certificate
-            set_signed_intermediate = client.secrets.pki.set_signed_intermediate(
-                certificate = sign_intermediate['data']['certificate'],
-                mount_point = mount_point
-            )
-            
-            #if option can be provided to check the status.
-            if set_signed_intermediate.status_code == SUCCESS_CODE:
-                pass
-            
-            # procced with establishing TTL    
-            client.sys.tune_mount_configuration(
-                mount_point, 
-                default_lease_ttl=ttl, 
-                max_lease_ttl=DEFAULT_MAX_TTL
-            )
-
+            # define the role
             set_role = client.secrets.pki.create_or_update_role(
                 name = ROLE_NAME,
                 mount_point = mount_point,
@@ -97,7 +81,24 @@ def allocate_cert_vault(mount_point, domain_name, common_name, ttl):
             #if option can be provided to check the status of role creation.
             if set_role.status_code == SUCCESS_CODE:
                 pass
+            
+            # procced with establishing TTL, meaning that ENIGNE TTL will be set up before INTERMEDIATE will be signed  
+            client.sys.tune_mount_configuration(
+                mount_point, 
+                default_lease_ttl=ttl, 
+                max_lease_ttl=DEFAULT_MAX_TTL
+            )
 
+            # submitting the signed CA certificate
+            set_signed_intermediate = client.secrets.pki.set_signed_intermediate(
+                certificate = sign_intermediate['data']['certificate'],
+                mount_point = mount_point
+            )
+            
+            #if option can be provided to check the status.
+            if set_signed_intermediate.status_code == SUCCESS_CODE:
+                pass
+            
             return None  #escape after configuration of intermediate CA
 
         if ttl == '0':
